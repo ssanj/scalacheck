@@ -11,6 +11,15 @@ licenses := Seq("BSD-style" -> url("http://www.opensource.org/licenses/bsd-licen
 
 homepage := Some(url("http://www.scalacheck.org"))
 
+credentials ++= (for {
+  username <- Option(System.getenv().get("SONATYPE_USERNAME"))
+  password <- Option(System.getenv().get("SONATYPE_PASSWORD"))
+} yield Credentials(
+  "Sonatype Nexus Repository Manager",
+  "oss.sonatype.org",
+  username, password
+)).toSeq
+
 scalaVersion := "2.12.0-M2"
 
 scalaParserCombinatorsVersion := "1.0.4"
