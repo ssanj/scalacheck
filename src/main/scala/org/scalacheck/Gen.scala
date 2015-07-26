@@ -36,7 +36,7 @@ sealed trait Gen[T] {
   def flatMap[U](f: T => Gen[U]): Gen[U] = gen { p =>
     val r1 = apply(p)
     r1.value match {
-      case None => res(p, None, Nil, r1.next.map(_.flatMap(f)))
+      case None => res(None, Nil, r1.next.map(_.flatMap(f)))
       case Some(t) =>
         val r2 = f(t).reseed.apply(p)
         new Result[U] {
@@ -72,13 +72,13 @@ sealed trait Gen[T] {
   def setNext(g: => Gen[T]): Gen[T] = mapNext (_ => Some(g))
 
   def mapNext(f: Option[Gen[T]] => Option[Gen[T]]): Gen[T] = mapResult { r =>
-    res(r.params, r.value, r.shrink, f(r.next))
+    res(r.value, r.shrink, f(r.next))
   }
 
   def terminate: Gen[T] = mapNext (_ => None)
 
   def withNext: Gen[(Option[T], Option[Gen[T]])] = mapResult { r =>
-    res(r.params, Some(r.value -> r.next), r.shrink.map(Some(_) -> r.next), None)
+    res(Some(r.value -> r.next), r.shrink.map(Some(_) -> r.next), None)
   }
 
   def followedBy(g: Gen[T]): Gen[T] = withNext flatMap {
@@ -87,23 +87,21 @@ sealed trait Gen[T] {
   }
 
   def withShrink: Gen[(T, () => Seq[T])] = mapResult { r =>
-    res(r.params, r.value.map(_ -> (() => r.shrink)),
+    res(r.value.map(_ -> (() => r.shrink)),
       r.shrink.map(_ -> (() => r.shrink)), r.next.map(_.withShrink))
   }
 
   def noShrink: Gen[T] = setShrink(_ => Nil)
 
   def setShrink(f: T => Seq[T]): Gen[T] = mapResult { r =>
-    res(r.params, r.value, r.value.map(f).getOrElse(Nil), r.next)
+    res(r.value, r.value.map(f).getOrElse(Nil), r.next)
   }
 
-  def unfold: Gen[Seq[T]] = unfold(p => p.reseed)
-
-  def unfold(fp: Parameters => Parameters): Gen[Seq[T]] =
-    iterate(fp).map(_.flatMap(_.value.toList).toList)
+  def unfold: Gen[Seq[T]] =
+    iterate.map(_.flatMap(_.value.toList).toList)
 
   def take(n: Int): Gen[Seq[T]] =
-    iterate(x => x).map(_.take(n).flatMap(_.value.toList).toList)
+    iterate.map(_.take(n).flatMap(_.value.toList).toList)
 
   def last = iterate.map { it =>
     var r: Option[T] = None
@@ -111,22 +109,17 @@ sealed trait Gen[T] {
     r
   }
 
-  def iterate: Gen[Iterator[Result[T]]] = iterate(p => p.reseed)
-
-  def iterate(fp: Parameters => Parameters): Gen[Iterator[Result[T]]] =
-    gen { p =>
-      res(p, Some(new Iterator[Result[T]] {
-        var nextGen: Option[Gen[T]] = Some(Gen.this)
-        var params = p
-        def hasNext = nextGen.isDefined
-        def next() = {
-          val r = nextGen.get.apply(params)
-          params = fp(params)
-          nextGen = r.next
-          r
-        }
-      }))
-    }
+  def iterate: Gen[Iterator[Result[T]]] = parameterized { p =>
+    const(new Iterator[Result[T]] {
+      var nextGen: Option[Gen[T]] = Some(Gen.this)
+      def hasNext = nextGen.isDefined
+      def next() = {
+        val r = nextGen.get.apply(p)
+        nextGen = r.next
+        r
+      }
+    })
+  }
 
 }
 
@@ -150,20 +143,17 @@ object Gen {
   }
 
   sealed trait Result[T] {
-    def params: Parameters
     def value: Option[T]
     def shrink: Seq[T]
     def next: Option[Gen[T]]
 
     def map[U](f: T => U): Result[U] = new Result[U] {
-      def params = Result.this.params
       def value = Result.this.value.map(f)
       def shrink = Result.this.shrink.map(f)
       def next = Result.this.next.map(_.map(f))
     }
 
     def filter(f: T => Boolean): Result[T] = new Result[T] {
-      def params = Result.this.params
       def value = Result.this.value.filter(f)
       def shrink = if(value.isDefined) Result.this.shrink else Nil
       def next = Result.this.next.map(_.filter(f))
@@ -175,10 +165,8 @@ object Gen {
   }
 
   private def res[T](
-    p: Parameters, v: Option[T], s: => Seq[T] = Nil,
-    n: => Option[Gen[T]] = None
+    v: Option[T], s: => Seq[T] = Nil, n: => Option[Gen[T]] = None
   ): Result[T] = new Result[T] {
-    val params = p
     val value = v
     def shrink = s
     def next = n
@@ -188,11 +176,13 @@ object Gen {
 
   def const[T](t: T): Gen[T] = fromOption(Some(t))
 
-  def fromOption[T](o: Option[T]): Gen[T] = gen(res(_, o))
+  def fromOption[T](o: Option[T]): Gen[T] = gen(_ => res(o))
 
-  val size: Gen[Int] = gen(p => res(p, Some(p.size)))
+  def parameterized[T](f: Parameters => Gen[T]): Gen[T] = gen(p => f(p).apply(p))
 
-  val seed: Gen[Long] = gen(p => res(p, Some(p.seed)))
+  val size: Gen[Int] = parameterized(p => const(p.size))
+
+  val seed: Gen[Long] = parameterized(p => const(p.seed))
 
   def seed(mod: Long): Gen[Long] = seed map (_ % mod)
 
