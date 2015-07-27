@@ -75,18 +75,17 @@ private abstract class ScalaCheckRunner(
 
     def execute(handler: EventHandler, loggers: Array[Logger]): Array[Task] =
       idxs flatMap { idx =>
-        val seed = 0
-        val size = 0
-
-        @tailrec def evalProp(p: Prop): (String, Test.Result[String]) = {
-          val r = p.sampleResult(seed,size)
+        @tailrec def evalProp(p: Prop, prms: Gen.Parameters): (String, Test.Result[String]) = {
+          val r = p.apply(prms)
+          val size = 0 // TODO: Calculate next size
           r.next match {
-            case Some(p1) => evalProp(p1)
+            case Some(p1) => evalProp(p1, prms.withSize(size).withSeed(r.nextSeed))
             case None => r.value.get
           }
         }
 
-        val (name, result) = evalProp(props(idx))
+        val prms = Gen.Parameters.default.withSize(0)
+        val (name, result) = evalProp(props(idx), prms)
 
         val event = new Event {
           val status = result match {

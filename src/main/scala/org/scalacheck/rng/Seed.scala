@@ -10,9 +10,7 @@ import scala.util.Random.nextInt
  */
 class Seed(a: Int, b: Int, c: Int, private[rng] val d: Int) {
 
-  /**
-   * Generate the next seed in the RNG's sequence.
-   */
+  /** Generate the next seed in the RNG's sequence. */
   def next: Seed = {
     val e = a - rotateLeft(b, 23)
     val a1 = b ^ rotateLeft(c, 16)
@@ -22,9 +20,7 @@ class Seed(a: Int, b: Int, c: Int, private[rng] val d: Int) {
     new Seed(a1, b1, c1, d1)
   }
 
-  /**
-   * Reseed the RNG using the given Long value.
-   */
+  /** Reseed the RNG using the given Long value. */
   def reseed(n: Long): Seed = {
     val n0 = ((n >>> 32) & 0xffffffff).toInt
     val n1 = (n & 0xffffffff).toInt
