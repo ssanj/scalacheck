@@ -20,17 +20,22 @@ credentials ++= (for {
   username, password
 )).toSeq
 
-scalaVersion := "2.12.0-M2"
+scalaVersion := "2.12.0-M3"
 
 scalaParserCombinatorsVersion := "1.0.4"
 
-crossScalaVersions := Seq("2.9.3", "2.10.5", "2.11.6", "2.12.0-M2")
+crossScalaVersions := Seq("2.9.3", "2.10.5", "2.11.6", "2.12.0-M3")
 
 mimaDefaultSettings
 
 previousArtifact := Some("org.scalacheck" % "scalacheck_2.11" % "1.11.5")
 
-resolvers += "sonatype" at "https://oss.sonatype.org/content/repositories/releases"
+resolvers ++= Seq(
+  "Scala 2.12.0-M3 Core" at "https://oss.sonatype.org/content/repositories/orgscala-lang-1272/",
+  "Scala 2.12.0-M3 Modules" at "https://oss.sonatype.org/content/repositories/orgscala-lang-1273/",
+  "sonatype" at "https://oss.sonatype.org/content/repositories/releases",
+  "sonatype-snapshots" at "https://oss.sonatype.org/content/repositories/snapshots"
+)
 
 libraryDependencies += "org.scala-sbt" %  "test-interface" % "1.0"
 
