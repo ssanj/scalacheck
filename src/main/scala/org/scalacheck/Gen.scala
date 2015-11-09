@@ -34,28 +34,45 @@ sealed abstract class Gen[T] {
   def mapResult[U](f: Result[T] => Result[U]): Gen[U] = gen(apply _ andThen f)
 
   /** Create a new generator by mapping the input to this generator */
-  def contramap(f: Parameters => Parameters): Gen[T] = gen(p => apply(f(p)))
+  def contramap(f: Parameters => Parameters): Gen[T] = gen { p =>
+    val np = f(p)
+    val r = apply(np)
+    new Result[T] {
+      def values = r.values
+      val nextParams = np
+      def nextGen = r.nextGen.map(_.contramap(f))
+    }
+  }
 
   /** Create a new generator by flat-mapping the result of this generator */
   def flatMap[U](f: T => Gen[U]): Gen[U] = gen { p =>
+    import Stream.{Empty, cons}
     val rt = apply(p)
-    rt.value match {
-      case None => res(rt.nextSeed, None, Nil, rt.next.map(_.flatMap(f)))
-      case Some(t) =>
-        val ru = f(t).apply(p.withSeed(rt.nextSeed))
-        new Result[U] {
-          val value = ru.value
-          val nextSeed = ru.nextSeed
-          lazy val shrink = ru.shrink ++ rt.shrink.flatMap { t =>
-            val r = f(t).apply(p.withSeed(rt.nextSeed))
-            r.value.toSeq ++ r.shrink
+    val ts = rt.values
+    val nextP = rt.nextParams
+    val nextGT = rt.nextGen
+    if (ts.isEmpty) new Result[U] {
+      val values = Empty
+      val nextParams = nextP
+      val nextGen = nextGT.map(_.flatMap(f))
+    } else {
+      val ru = f(ts.head).apply(nextP)
+      val us = ru.values
+      val nextGU = ru.nextGen
+      new Result[U] {
+        def values = if (us.isEmpty) Empty else cons(
+          us.head,
+          ts.tail.foldLeft(us.tail) { (ack, t) =>
+            ack ++ f(t).apply(nextP).values
           }
-          lazy val next = (rt.next, ru.next) match {
-            case (Some(gt),Some(gu)) => Some(oneOfGens(gt.flatMap(f), gu))
-            case (None,gu) => gu
-            case (gt,None) => gt.map(_.flatMap(f))
-          }
+        )
+        val nextParams = ru.nextParams
+        val nextGen = (nextGT, nextGU) match {
+          case (Some(gt),Some(gu)) => Some(oneOfGens(gt.flatMap(f), gu))
+          case (None,gu) => gu
+          case (gt,None) => gt.map(_.flatMap(f))
         }
+      }
     }
   }
 
@@ -86,27 +103,43 @@ sealed abstract class Gen[T] {
    *  returned. Use this combinator with care, since it may result
    *  in infinite loops. Also, make sure that the provided test property
    *  is side-effect free, eg it should not use external vars. */
-  def retryUntil(p: T => Boolean): Gen[T] = gen { p0 =>
-    var r = apply(p0)
-    while (!r.value.map(p).getOrElse(false))
-      r = apply(p0.withSeed(r.nextSeed))
+  def retryUntil(p: T => Boolean): Gen[T] = gen { params =>
+    var r = apply(params)
+    var ts = r.values
+    while (ts.isEmpty || !p(ts.head)) {
+      r = apply(r.nextParams)
+      ts = r.values
+    }
     r
   }
 
-  def sample: Option[T] = apply(Parameters.default).value
+  def sample: Option[T] = apply(Parameters.default).values.headOption
 
-  def repeatedly: Gen[T] = setNext(repeatedly)
+  def repeatedly: Gen[T] = mapNext {
+    case None => Some(this.repeatedly)
+    case g => g.map(_.followedBy(this.repeatedly))
+  }
 
   def setNext(g: => Gen[T]): Gen[T] = setNextOpt(Some(g))
 
   def setNextOpt(g: => Option[Gen[T]]): Gen[T] = mapNext(_ => g)
 
   def mapNext(f: Option[Gen[T]] => Option[Gen[T]]): Gen[T] = mapResult { r =>
-    res(r.nextSeed, r.value, r.shrink, f(r.next))
+    new Result[T] {
+      val nextParams = r.nextParams
+      def values = r.values
+      lazy val nextGen = f(r.nextGen)
+    }
   }
 
   def withNext: Gen[(Option[T], Option[Gen[T]])] = mapResult { r =>
-    res(r.nextSeed, Some(r.value -> r.next), r.shrink.map(Some(_) -> r.next), None)
+    val ng = r.nextGen
+    val ts = r.values
+    new Result[(Option[T], Option[Gen[T]])] {
+      val nextParams = r.nextParams
+      def values = Stream.cons(ts.headOption -> ng, ts.tail.map(Some(_) -> ng))
+      val nextGen = None
+    }
   }
 
   def followedBy(g: => Gen[T]): Gen[T] = mapNext {
@@ -114,32 +147,50 @@ sealed abstract class Gen[T] {
     case Some(g0) => Some(g0 followedBy g)
   }
 
-  def withShrink: Gen[(T, () => Seq[T])] = mapResult { r =>
-    res(r.nextSeed, r.value.map(_ -> (() => r.shrink)),
-      r.shrink.map(_ -> (() => r.shrink)), r.next.map(_.withShrink))
+  def withShrink: Gen[(T, Stream[T])] = mapResult { r =>
+    val ts = r.values
+    new Result[(T, Stream[T])] {
+      val nextParams = r.nextParams
+      def values = if (ts.isEmpty) Stream.empty
+                   else Stream.cons((ts.head,ts.tail), Stream.Empty)
+      lazy val nextGen = r.nextGen.map(_.withShrink)
+    }
   }
 
-  def noShrink: Gen[T] = setShrink(_ => Nil)
+  def noShrink: Gen[T] = setShrink(_ => Stream.Empty)
 
-  def setShrink(f: T => Seq[T]): Gen[T] = mapResult { r =>
-    res(r.nextSeed, r.value, r.value.map(f).getOrElse(Nil), r.next)
+  def setShrink(f: T => Stream[T]): Gen[T] = mapResult { r =>
+    val ts = r.values
+    new Result[T] {
+      val nextParams = r.nextParams
+      def values = if (ts.isEmpty) Stream.Empty else {
+        val t = ts.head
+        Stream.cons(t, f(t))
+      }
+      lazy val nextGen = r.nextGen.map(_.setShrink(f))
+    }
   }
 
   def unfold: Gen[Seq[T]] =
-    iterate.map(_.flatMap(_.value.toList).toList)
+    iterate.map(_.flatMap(_.values.headOption).toSeq)
 
   def take(n: Int): Gen[Seq[T]] =
-    iterate.map(_.take(n).flatMap(_.value.toList).toList)
+    iterate.map(_.flatMap(_.values.headOption).take(n).toSeq)
 
-  def iterate: Gen[Iterator[Result[T]]] = parameterized { p =>
-    const(new Iterator[Result[T]] {
-      var r = res(p.seed, None, Nil, Some(Gen.this))
-      def hasNext = r.next.isDefined
+  def iterate: Gen[Iterator[Result[T]]] = gen { p =>
+    val it = new Iterator[Result[T]] {
+      var r: Result[T] = new Result[T] {
+        val nextParams = p
+        val values = Stream.Empty
+        val nextGen = Some(Gen.this)
+      }
+      def hasNext = r.nextGen.isDefined
       def next() = {
-        r = r.next.get.apply(p.withSeed(r.nextSeed))
+        r = r.nextGen.get.apply(r.nextParams)
         r
       }
-    })
+    }
+    simpleResult(p, Some(it))
   }
 
   override def toString: String = "<GEN>"
@@ -163,29 +214,14 @@ object Gen {
     (t.get, b.result)
   }
 
-  private def dropIdx[T](xs: Traversable[T], idx: Int): (T,Seq[T]) = {
-    val b = new collection.immutable.VectorBuilder[T]
-    var i = 0
-    var t: Option[T] = None
-    xs.foreach { x =>
-      if (i != idx) b += x
-      else t = Some(x)
-      i += 1
-    }
-    (t.get, b.result)
-  }
-
   private def gen[T](f: Parameters => Result[T]): Gen[T] = new Gen[T] {
     def apply(p: Parameters) = f(p)
   }
 
-  private def res[T](
-    seed: Seed, v: Option[T], s: => Seq[T] = Nil, n: => Option[Gen[T]] = None
-  ): Result[T] = new Result[T] {
-    val value = v
-    val nextSeed = seed
-    def shrink = s
-    def next = n
+  private def simpleResult[T](p: Parameters, v: Option[T]): Result[T] = new Result[T] {
+    val nextParams = p
+    val values = v.toStream
+    val nextGen = None
   }
 
   //// Public interface ////
@@ -225,23 +261,20 @@ object Gen {
   }
 
   sealed abstract class Result[T] {
-    def value: Option[T]
-    def nextSeed: Seed
-    def shrink: Seq[T]
-    def next: Option[Gen[T]]
+    def values: Stream[T]
+    def nextParams: Parameters
+    def nextGen: Option[Gen[T]]
 
     def map[U](f: T => U): Result[U] = new Result[U] {
-      def value = Result.this.value.map(f)
-      def nextSeed = Result.this.nextSeed
-      def shrink = Result.this.shrink.map(f)
-      def next = Result.this.next.map(_.map(f))
+      def values = Result.this.values.map(f)
+      def nextParams = Result.this.nextParams
+      def nextGen = Result.this.nextGen.map(_.map(f))
     }
 
     def filter(f: T => Boolean): Result[T] = new Result[T] {
-      def value = Result.this.value.filter(f)
-      def nextSeed = Result.this.nextSeed
-      def shrink = if(value.isDefined) Result.this.shrink else Nil
-      def next = Result.this.next.map(_.filter(f))
+      def values = Result.this.values.filter(f)
+      def nextParams = Result.this.nextParams
+      def nextGen = Result.this.nextGen.map(_.filter(f))
     }
   }
 
@@ -255,11 +288,11 @@ object Gen {
   object Choose {
 
     // TODO
-    private def shrinkLong(lowerBound: Long, n: Long): List[Long] = Nil
-    private def shrinkDouble(lowerBound: Double, n: Double): List[Double] = Nil
+    private def shrinkLong(lowerBound: Long, n: Long): Stream[Long] = Stream.Empty
+    private def shrinkDouble(lowerBound: Double, n: Double): Stream[Double] = Stream.Empty
 
     private def chLng(l: Long, h: Long)(p: Parameters): Result[Long] = {
-      if (h < l) res(p.seed, None) else {
+      if (h < l) simpleResult(p, None) else {
         val d = h - l + 1
         if (d <= 0) {
           var (n,s) = Rng.long(p.seed)
@@ -268,23 +301,35 @@ object Gen {
             n = n1
             s = s1
           }
-          res(s, Some(n), shrinkLong(l, n))
+          new Result[Long] {
+            val nextParams = p.withSeed(s)
+            val nextGen = None
+            def values = Stream.cons(n, shrinkLong(l, n))
+          }
         } else {
           val (n, s) = Rng.long(p.seed)
           val v = l + (n & 0x7fffffffffffffffL) % d
-          res(s, Some(v), shrinkLong(l, v))
+          new Result[Long] {
+            val nextParams = p.withSeed(s)
+            val nextGen = None
+            def values = Stream.cons(v, shrinkLong(l, v))
+          }
         }
       }
     }
 
     private def chDbl(l: Double, h: Double)(p: Parameters): Result[Double] = {
       val d = h-l
-      if (d < 0 || d > Double.MaxValue) res(p.seed, None)
-      else if (d == 0) res(p.seed, Some(l))
+      if (d < 0 || d > Double.MaxValue) simpleResult(p, None)
+      else if (d == 0) simpleResult(p, Some(l))
       else {
         val (n, s) = Rng.double(p.seed)
         val v = n * (h-l) + l
-        res(s, Some(v), shrinkDouble(l, v))
+        new Result[Double] {
+          val nextParams = p.withSeed(s)
+          val nextGen = None
+          def values = Stream.cons(v, shrinkDouble(l, v))
+        }
       }
     }
 
@@ -337,7 +382,7 @@ object Gen {
 
   /** A generator that fails if the provided option value is undefined,
    *  otherwise just returns the value. */
-  def fromOption[T](o: Option[T]): Gen[T] = gen(p => res(p.seed, o))
+  def fromOption[T](o: Option[T]): Gen[T] = gen(p => simpleResult(p, o))
 
   /** A generator that generates a random value in the given (inclusive)
    *  range. If the range is invalid, the generator will not generate
@@ -392,7 +437,7 @@ object Gen {
       val (t, rest) = dropIdx(ts, idx)
       const(t) setNextOpt {
         if(rest.isEmpty) None else Some(oneOf(rest))
-      } setShrink { _ => ts.take(idx).reverse }
+      } setShrink { _ => rest.toStream }
     }
 
   /** Picks a random value from a list */
@@ -403,15 +448,18 @@ object Gen {
     oneOfGens(const[Option[T]](None), g.map[Option[T]](Some.apply))
 
   /** Generates a uniformly distributed Long value */
-  val long: Gen[Long] = gen { p =>
+  lazy val int: Gen[Int] = long.map(l => (l >> 32).toInt)
+
+  /** Generates a uniformly distributed Long value */
+  lazy val long: Gen[Long] = gen { p =>
     val (r, nextSeed) = Rng.long(p.seed)
-    res(nextSeed, Some(r))
+    simpleResult(p.withSeed(nextSeed), Some(r))
   }
 
   /** Generates a uniformly distributed Double value */
-  val double: Gen[Double] = gen { p =>
+  lazy val double: Gen[Double] = gen { p =>
     val (r, nextSeed) = Rng.double(p.seed)
-    res(nextSeed, Some(r))
+    simpleResult(p.withSeed(nextSeed), Some(r))
   }
 
   def zip[T1,T2](g1: Gen[T1], g2: Gen[T2]

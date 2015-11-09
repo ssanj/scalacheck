@@ -77,10 +77,9 @@ private abstract class ScalaCheckRunner(
       idxs flatMap { idx =>
         @tailrec def evalProp(p: Prop, prms: Gen.Parameters): (String, Test.Result[String]) = {
           val r = p.apply(prms)
-          val size = 0 // TODO: Calculate next size
-          r.next match {
-            case Some(p1) => evalProp(p1, prms.withSize(size).withSeed(r.nextSeed))
-            case None => r.value.get
+          r.nextGen match {
+            case Some(p1) => evalProp(p1, r.nextParams)
+            case None => r.values.head
           }
         }
 

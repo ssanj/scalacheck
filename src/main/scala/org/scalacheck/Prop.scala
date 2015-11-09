@@ -36,7 +36,7 @@ class Properties(prefix: String) {
    */
   class PropertySpecifier() {
     def update[T](propName: String, p: Gen[Prop.Result[T]]) =
-      props += Test.check2(p.map(_.map(_.toString))).map(
+      props += Test.check(p.map(_.map(_.toString))).map(
         s"$prefix.$propName" -> _
       )
   }
@@ -92,21 +92,20 @@ object Prop {
   def forAll[T,U,R](g: Gen[T])(f: T => Gen[R])(implicit r: R => Result[U]
   ): Gen[Result[(T,U)]] = {
 
-    def findSmaller(ts: Seq[T]): Gen[Option[(T,U)]] = {
-      val (t, tail) = ts.splitAt(1)
-      if (t.isEmpty) Gen.const(None)
-      else f(t.head).map(r) flatMap {
-        case False(u,u0) => findSmaller(tail) map {
-          case None => Some(t.head -> u0.getOrElse(u))
+    def findSmaller(ts: Stream[T]): Gen[Option[(T,U)]] = {
+      if (ts.isEmpty) Gen.const(None)
+      else f(ts.head).map(r) flatMap {
+        case False(u,u0) => findSmaller(ts.tail) map {
+          case None => Some(ts.head -> u0.getOrElse(u))
           case some => some
         }
-        case _ => findSmaller(tail)
+        case _ => findSmaller(ts.tail)
       }
     }
 
     g.withShrink flatMap { case (t,ts) =>
       f(t).map(r) flatMap {
-        case False(u, u0) => findSmaller(ts()) map {
+        case False(u, u0) => findSmaller(ts) map {
           case None => False((t,u), u0.map(t -> _))
           case some => False((t,u), some)
         }

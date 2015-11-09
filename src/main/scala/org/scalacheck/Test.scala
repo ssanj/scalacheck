@@ -37,9 +37,8 @@ object Test {
 
   import Gen.const
 
-  def check2[T](g: Gen[Prop.Result[T]]): Gen[Result[T]] = {
-
-    def ck(s: Int, d: Int, g: Gen[Prop.Result[T]]): Gen[Result[T]] =
+  def check[T](g: Gen[Prop.Result[T]]): Gen[Result[T]] = {
+    def ck(s: Int, d: Int, g: Gen[Prop.Result[T]]): Gen[Result[T]] = {
       g.withNext flatMap {
         case (Some(Prop.False(ev,ev0)), _) => const(Failed(ev,ev0))
         case (Some(Prop.Throw(ev,ev0)), _) => const(PropException(ev,ev0))
@@ -50,42 +49,9 @@ object Test {
         case (t, Some(ng)) =>
           Gen.fail.setNext(if(t.isDefined) ck(s+1,d,ng) else ck(s,d+1,ng))
       }
+    }
 
     ck(0,0,g)
-
-  }
-
-/*
-  def check2[T](g: Gen[Prop.Result[T]]): Gen[Result[T]] = count(g).withNext flatMap {
-    case (None, _) => error("BUG: count() should never fail")
-    case (Some(x),ng) => (x,ng) match {
-      case ((_,_,Some(Prop.False(ev,ev0))), _) => const(Failed(ev,ev0))
-      case ((_,_,Some(Prop.Throw(ev,ev0))), _) => const(PropException(ev,ev0))
-      case ((s,_,Some(Prop.True())), _) if s >= minSuccess => const(Passed())
-      case ((s,d,_), _) if s+d >= minSuccess && d > s*maxDiscardRatio =>
-        const(Exhausted())
-      case ((s,d,_), None) if s > 0 && d == 0 => const(Proved())
-      case (_, None) => const(Exhausted())
-      case (_, Some(ng)) => ng
-    }
-  }
-*/
-
-  def check[T](g: Gen[Prop.Result[T]]): Gen[Result[T]] = g.iterate.map { it =>
-    @tailrec def res(s: Int, d: Int): Result[T] = {
-      if (s >= minSuccess) Passed()
-      else if (s+d >= minSuccess && d > s*maxDiscardRatio) Exhausted()
-      else if (it.hasNext) it.next().value match {
-        case Some(Prop.True()) => res(s+1,d)
-        case Some(Prop.False(ev,ev0)) => Failed(ev,ev0)
-        case Some(Prop.Throw(ev,e)) => PropException(ev,e)
-        case None => res(s,d+1)
-      }
-      else if (s > 0 && d == 0) Proved()
-      else Exhausted()
-    }
-
-    res(0, 0)
   }
 
 }
