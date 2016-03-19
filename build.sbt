@@ -20,11 +20,11 @@ credentials ++= (for {
   username, password
 )).toSeq
 
-scalaVersion := "2.12.0-M3"
+scalaVersion := "2.12.0-M3-dc9effe"
 
 scalaParserCombinatorsVersion := "1.0.4"
 
-crossScalaVersions := Seq("2.9.3", "2.10.5", "2.11.6", "2.12.0-M3")
+crossScalaVersions := Seq("2.9.3", "2.10.5", "2.11.6", "2.12.0-M3-dc9effe")
 
 mimaDefaultSettings
 
