@@ -34,17 +34,15 @@ lazy val sharedSettings = MimaSettings.settings ++ Seq(
     username, password
   )).toSeq,
 
-  scalaVersion := "2.12.0-M4",
+  scalaVersion := "2.12.0-M5",
 
-  crossScalaVersions := Seq("2.10.5", "2.11.7", "2.12.0-M4"),
+  crossScalaVersions := Seq("2.10.5", "2.11.7", "2.12.0-M5"),
 
   unmanagedSourceDirectories in Compile += (baseDirectory in LocalRootProject).value / "src" / "main" / "scala",
 
   unmanagedSourceDirectories in Test += (baseDirectory in LocalRootProject).value / "src" / "test" / "scala",
 
   resolvers ++= Seq(
-    "Scala 2.12.0-M4 Core" at "https://oss.sonatype.org/content/repositories/orgscala-lang-1304/",
-    "Scala 2.12.0-M4 Modules" at "https://oss.sonatype.org/content/repositories/orgscala-lang-1305/",
     "sonatype" at "https://oss.sonatype.org/content/repositories/releases",
     "sonatype-snapshots" at "https://oss.sonatype.org/content/repositories/snapshots"
   ),
