@@ -18,3 +18,7 @@ target
 
 /examples/simple-sbt/project/
 /examples/simple-sbt/target/
+
+# ide
+*.ctags_srcs/
+.tags
