@@ -14,6 +14,7 @@ import scala.language.reflectiveCalls
 import java.util.concurrent.atomic.AtomicInteger
 
 import org.scalacheck.Test.Parameters
+import org.scalacheck.Test.matchRunFilter
 
 private abstract class ScalaCheckRunner extends Runner {
 
@@ -97,19 +98,11 @@ private abstract class ScalaCheckRunner extends Runner {
       names flatMap { name =>
         import util.Pretty.{pretty, Params}
 
-        def matchFilter(_name: String, fragment: String): Boolean = {
-          _name.split("\\.") match {
-            case Array(prefix, suffix) if (suffix.contains(fragment)) => true
-            case Array(testName) if (testName.contains(fragment)) => true
-            case _ => false
-          }
-        }
-
         for ((`name`, prop) <- props) {
           val params = applyCmdParams(properties.foldLeft(Parameters.default)((params, props) => props.overrideParameters(params)))
           val filter = params.runFilter
 
-          if (filter.isEmpty || filter.exists(matchFilter(name, _))) {
+          if (filter.isEmpty || filter.exists(matchRunFilter(name, _))) {
             val result = Test.check(params, prop)
 
             val event = new Event {

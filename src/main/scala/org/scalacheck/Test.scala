@@ -343,20 +343,20 @@ object Test {
     timedRes
   }
 
+  def matchRunFilter(testName: String, fragment: String): Boolean = {
+    testName.split("\\.") match {
+      case Array(prefix, suffix) if (suffix.contains(fragment)) => true
+      case Array(testName) if (testName.contains(fragment)) => true
+      case _ => false
+    }
+  }
+
   /** Check a set of properties. */
   def checkProperties(prms: Parameters, ps: Properties): Seq[(String,Result)] = {
     val params = ps.overrideParameters(prms)
 
-    def matchFilter(_name: String, fragment: String): Boolean = {
-      _name.split("\\.") match {
-        case Array(prefix, suffix) if (suffix.contains(fragment)) => true
-        case Array(testName) if (testName.contains(fragment)) => true
-        case _ => false
-      }
-    }
-
     ps.properties.filter {
-      case (name, _) => prms.runFilter.fold(true)(matchFilter(name, _))
+      case (name, _) => prms.runFilter.fold(true)(matchRunFilter(name, _))
     } map {
       case (name, p)  =>
         val testCallback = new TestCallback {
