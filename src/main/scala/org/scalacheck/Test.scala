@@ -256,7 +256,8 @@ object Test {
 
     val opts = Set[Opt[_]](
       OptMinSuccess, OptMaxDiscardRatio, OptMinSize,
-      OptMaxSize, OptWorkers, OptVerbosity, OptRunFilter
+      OptMaxSize, OptWorkers, OptVerbosity,
+      OptRunFilter
     )
 
     def parseParams(args: Array[String]): (Parameters => Parameters, List[String]) = {
